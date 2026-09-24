@@ -1,24 +1,50 @@
-# Topmate MCP
+# Topmate MCP Gateway
 
-Read-only MCP server for the public Topmate profile:
+Professional `v1-alpha` creator-commerce MCP gateway for Topmate-compatible workflows.
 
-https://topmate.io/amit_kumar_jha
+## What this branch contains
 
-## Production tools
+- creator profile and availability
+- 1:1 session/service creation and updates
+- booking creation, rescheduling and cancellation
+- digital-product creation, update and publish
+- webinars, cohorts, courses and group events
+- packages/bundles
+- priority DMs / creator messaging
+- customer CRM and notes
+- orders, payments, refunds and payouts
+- coupons
+- creator analytics
+- webhooks
+- capability discovery
+- scope enforcement
+- idempotent writes
+- mutation audit trail
+- rate limiting
+- provider abstraction for Topmate's official API
 
-- `topmate_get_profile`
-- `topmate_list_services`
-- `topmate_mcp_status`
+## Provider modes
 
-The deployment uses the official Python MCP SDK v2 high-level `MCPServer` API with stateless Streamable HTTP and JSON responses, suitable for serverless runtimes.
+`TOPMATE_PROVIDER=sandbox` gives a complete synthetic demo. `TOPMATE_PROVIDER=public` exposes only public Topmate reads. The future production adapter plugs Topmate-authorized APIs into the same action contract; this project does not reverse-engineer private Topmate endpoints.
 
-## Deploy to Vercel
+## Environment
 
-[Deploy to Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FAIM-IT4%2Ftopmate-mcp)
+```bash
+TOPMATE_PROVIDER=sandbox
+TOPMATE_CREATOR_ID=demo_creator
+TOPMATE_PROFILE_URL=https://topmate.io/amit_kumar_jha
+MCP_AUTH_MODE=none
+MCP_BEARER_TOKEN=
+MCP_RATE_LIMIT_PER_MINUTE=120
+```
 
-After deployment:
+## Run
 
-- Health check: `https://<your-project>.vercel.app/health`
-- MCP endpoint: `https://<your-project>.vercel.app/mcp`
+```bash
+pip install -r requirements.txt
+uvicorn app:app --host 0.0.0.0 --port 8000
+```
 
-Private Gmail/Calendar tools are intentionally not enabled on the public endpoint yet. Add authentication before enabling them.
+Endpoints: `/health`, `/capabilities`, and MCP at `/mcp`.
+
+See `docs/ARCHITECTURE.md`, `docs/TOOL_CATALOG.md`, and `SECURITY.md`.
