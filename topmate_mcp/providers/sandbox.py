@@ -23,10 +23,10 @@ class SandboxProvider(TopmateProvider):
         "analytics.summary", "webhooks.list", "webhooks.create", "webhooks.delete",
     })
 
-    def __init__(self) -> None:
+    def __init__(self, creator_id: str = "demo_creator") -> None:
         self._seq = count(1001)
         self.creator: dict[str, Any] = {
-            "id": "demo_creator", "name": "Demo Creator", "handle": "demo_creator",
+            "id": creator_id, "name": f"Sandbox Creator {creator_id}", "handle": creator_id,
             "bio": "Sandbox creator account for Topmate MCP demonstrations.",
             "timezone": "Asia/Kolkata", "currency": "INR",
         }
