@@ -77,6 +77,7 @@ MCP_JWT_ISSUER=https://<issuer>/
 MCP_JWT_AUDIENCE=topmate-mcp
 MCP_JWT_CREATOR_CLAIM=creator_id
 MCP_JWT_ALGORITHMS=RS256
+MCP_RESOURCE_URL=https://<your-domain>/mcp
 ```
 
 HS256 is also supported for controlled deployments through `MCP_JWT_SECRET`.
@@ -114,7 +115,10 @@ The current in-process stores are appropriate for sandbox/pilot testing. At larg
 - `GET /health` — health check
 - `GET /capabilities` — gateway-level capabilities
 - `GET /auth/session` — validates the supplied bearer/JWT and returns the non-secret principal
+- `GET /.well-known/oauth-protected-resource` — RFC 9728 MCP OAuth discovery metadata
 - `/mcp` — stateless Streamable HTTP MCP endpoint
+
+When an authenticated MCP request is missing or invalid, the gateway returns HTTP 401 with a `WWW-Authenticate` challenge pointing clients to the protected-resource metadata endpoint. In JWT/OIDC mode that metadata identifies the configured authorization server, allowing compatible MCP hosts to start the login flow.
 
 ## Run
 
