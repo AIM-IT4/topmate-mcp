@@ -22,7 +22,7 @@ jobs:
       - name: Compile
         run: python -m compileall -q app.py topmate_mcp
       - name: Unit tests
-        run: pytest -q
+        run: python -m pytest -q
       - name: Import production app
         env:
           TOPMATE_PROVIDER: sandbox
