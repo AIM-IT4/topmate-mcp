@@ -30,6 +30,7 @@ class Settings:
     jwt_audience: str | None = field(default_factory=lambda: os.getenv("MCP_JWT_AUDIENCE"))
     jwt_algorithms_csv: str = field(default_factory=lambda: _env("MCP_JWT_ALGORITHMS", ""))
     jwt_creator_claim: str = field(default_factory=lambda: _env("MCP_JWT_CREATOR_CLAIM", "creator_id"))
+    resource_url: str | None = field(default_factory=lambda: os.getenv("MCP_RESOURCE_URL"))
 
     scopes_csv: str = field(
         default_factory=lambda: _env(
