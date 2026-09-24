@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
-from mcp.server.mcpserver import MCPServer
-from starlette.responses import JSONResponse
-from starlette.routing import Route
+from fastapi import FastAPI
+from mcp.server import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 PROFILE_URL = "https://topmate.io/amit_kumar_jha"
-USER_AGENT = "topmate-mcp/0.1 (+https://modelcontextprotocol.io)"
+USER_AGENT = "topmate-mcp/0.2"
 TIMEOUT = 20.0
 
 mcp = MCPServer(
@@ -126,10 +127,7 @@ def _extract_services(
         for _ in range(4):
             if container is None:
                 break
-            candidates = container.find_all(
-                ["h2", "h3", "h4", "strong", "b"],
-                limit=5,
-            )
+            candidates = container.find_all(["h2", "h3", "h4", "strong", "b"], limit=5)
             names = [
                 candidate.get_text(" ", strip=True)
                 for candidate in candidates
@@ -143,42 +141,6 @@ def _extract_services(
                     found.append({"name": name, "price_text": price_text})
                 break
             container = container.parent
-
-    if not found and "Services" in full_text:
-        section = full_text.split("Services", 1)[1]
-        section = re.split(
-            r"\nAbout me\b|\nTestimonials\b|\nTerms\b",
-            section,
-            maxsplit=1,
-            flags=re.I,
-        )[0]
-        lines = [line.strip() for line in section.splitlines() if line.strip()]
-        price_line_re = re.compile(
-            r"^(FREE|(?:₹|Rs\.?|INR|\$|USD|€|EUR|£|GBP)\s*[0-9])",
-            re.I,
-        )
-        for index, line in enumerate(lines):
-            if not price_line_re.search(line):
-                continue
-            name = None
-            for cursor in range(index - 1, max(-1, index - 5), -1):
-                candidate = lines[cursor]
-                if candidate.lower() not in {
-                    "popular",
-                    "best seller",
-                    "digital product",
-                    "priority dm",
-                }:
-                    name = candidate
-                    break
-            if name:
-                key = (name, line)
-                if key not in seen:
-                    seen.add(key)
-                    found.append(
-                        {"name": name[:300], "price_text": line[:100]}
-                    )
-
     return found[:100]
 
 
@@ -191,11 +153,7 @@ def parse_profile_html(profile_url: str, html: str) -> dict[str, Any]:
     if h1:
         title = h1.get_text(" ", strip=True)
     if not title and soup.title:
-        title = (
-            soup.title.get_text(" ", strip=True)
-            .replace(" | Topmate", "")
-            .strip()
-        )
+        title = soup.title.get_text(" ", strip=True).replace(" | Topmate", "").strip()
 
     description = None
     meta_desc = soup.find("meta", attrs={"name": "description"})
@@ -212,47 +170,31 @@ def parse_profile_html(profile_url: str, html: str) -> dict[str, Any]:
         except Exception:
             pass
 
-    about = None
-    match = re.search(
-        r"\bAbout me\b\s*(.+?)(?:\n(?:Terms|Privacy|Services)\b|$)",
-        text,
-        re.I | re.S,
-    )
-    if match:
-        about = re.sub(r"\s+", " ", match.group(1)).strip()[:2000]
-
     return {
         "profile_url": normalize_profile_url(profile_url),
         "name": title,
         "description": description,
         "rating": _match_float(text, r"(?<!\d)([0-5](?:\.\d+)?)\s*/\s*5"),
         "bookings": _match_compact_number(
-            text,
-            r"([0-9]+(?:\.[0-9]+)?[kKmM]?)\s+bookings?\b",
+            text, r"([0-9]+(?:\.[0-9]+)?[kKmM]?)\s+bookings?\b"
         ),
         "testimonials": _match_compact_number(
-            text,
-            r"([0-9]+(?:\.[0-9]+)?[kKmM]?)\s+testimonials?\b",
+            text, r"([0-9]+(?:\.[0-9]+)?[kKmM]?)\s+testimonials?\b"
         ),
-        "about": about,
         "services": _extract_services(soup, text, json_ld),
         "source": "public_topmate_profile",
     }
 
 
 @mcp.tool()
-async def topmate_get_profile(
-    profile_url: str | None = None,
-) -> dict[str, Any]:
+async def topmate_get_profile(profile_url: str | None = None) -> dict[str, Any]:
     """Read a public Topmate profile and return metadata plus detected services."""
     url = normalize_profile_url(profile_url or PROFILE_URL)
     return parse_profile_html(url, await fetch_html(url))
 
 
 @mcp.tool()
-async def topmate_list_services(
-    profile_url: str | None = None,
-) -> list[dict[str, Any]]:
+async def topmate_list_services(profile_url: str | None = None) -> list[dict[str, Any]]:
     """List services/products detected on a public Topmate profile."""
     profile = await topmate_get_profile(profile_url)
     return profile.get("services", [])
@@ -260,7 +202,7 @@ async def topmate_list_services(
 
 @mcp.tool()
 def topmate_mcp_status() -> dict[str, Any]:
-    """Return production readiness without exposing private data."""
+    """Return deployment readiness without exposing private data."""
     return {
         "status": "ready",
         "profile_url": PROFILE_URL,
@@ -268,24 +210,50 @@ def topmate_mcp_status() -> dict[str, Any]:
         "private_google_tools": False,
         "transport": "streamable-http",
         "deployment_target": "vercel",
+        "version": "0.2",
     }
 
 
-async def health(_request):
-    return JSONResponse(
-        {
-            "status": "ok",
-            "service": "topmate-mcp",
-            "profile_url": PROFILE_URL,
-            "mcp_endpoint": "/mcp",
-        }
-    )
-
-
-app = mcp.streamable_http_app(
-    streamable_http_path="/mcp",
+security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+mcp_app = mcp.streamable_http_app(
+    streamable_http_path="/",
     stateless_http=True,
     json_response=True,
-    host="0.0.0.0",
-    custom_starlette_routes=[Route("/health", health, methods=["GET"])],
+    transport_security=security,
 )
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with mcp.session_manager.run():
+        yield
+
+
+app = FastAPI(
+    title="Topmate MCP",
+    version="0.2",
+    lifespan=lifespan,
+)
+
+
+@app.get("/")
+async def root():
+    return {
+        "service": "topmate-mcp",
+        "status": "ok",
+        "health": "/health",
+        "mcp": "/mcp",
+    }
+
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "ok",
+        "service": "topmate-mcp",
+        "profile_url": PROFILE_URL,
+        "mcp_endpoint": "/mcp",
+    }
+
+
+app.mount("/mcp", mcp_app)
