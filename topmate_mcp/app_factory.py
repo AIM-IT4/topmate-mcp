@@ -64,9 +64,21 @@ def build_app() -> FastAPI:
                 request.headers.get("authorization")
             )
         except AuthenticationError as exc:
+            resource_metadata_url = (
+                str(request.base_url).rstrip("/")
+                + "/.well-known/oauth-protected-resource"
+            )
             return JSONResponse(
-                {"error": "unauthorized", "detail": str(exc)},
+                {
+                    "error": "invalid_token",
+                    "error_description": str(exc),
+                },
                 status_code=401,
+                headers={
+                    "WWW-Authenticate": (
+                        f'Bearer resource_metadata="{resource_metadata_url}"'
+                    )
+                },
             )
 
         context_token = set_current_principal(principal)
@@ -104,7 +116,25 @@ def build_app() -> FastAPI:
             "providers": ["sandbox", "public"],
             "multi_tenant": True,
             "tenant_identity_source": "authenticated principal",
+            "oauth_discovery": "/.well-known/oauth-protected-resource",
         }
+
+    @app.get("/.well-known/oauth-protected-resource")
+    async def protected_resource_metadata(request: Request):
+        resource = settings.resource_url or (
+            str(request.base_url).rstrip("/") + "/mcp"
+        )
+        metadata = {
+            "resource": resource,
+            "scopes_supported": sorted(settings.scopes),
+            "bearer_methods_supported": ["header"],
+        }
+        if settings.jwt_issuer:
+            metadata["authorization_servers"] = [settings.jwt_issuer]
+        return JSONResponse(
+            metadata,
+            headers={"Access-Control-Allow-Origin": "*"},
+        )
 
     @app.get("/auth/session")
     async def auth_session(request: Request):
