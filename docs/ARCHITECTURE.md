@@ -46,7 +46,9 @@ Creator identity never comes from MCP tool arguments.
 - `multi_bearer`: hashed per-creator opaque tokens for pilots.
 - `jwt`: JWT/OIDC access-token verification with either JWKS asymmetric signing or a controlled shared secret.
 
-JWT mode can enforce issuer, audience, accepted algorithms, expiry and subject. Creator identity is read from the configured claim (default `creator_id`) with `sub` as fallback.
+JWT mode requires issuer, audience and signing-key configuration and validates expiry and subject. Creator identity is read from the configured claim (default `creator_id`) with `sub` as fallback.
+
+For remote MCP compatibility, the gateway exposes RFC 9728 Protected Resource Metadata at `/.well-known/oauth-protected-resource`. Unauthorized `/mcp` requests return a `WWW-Authenticate` challenge containing that metadata URL so an MCP host can discover the authorization server and initiate OAuth.
 
 ## Provider modes
 
