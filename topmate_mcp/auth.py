@@ -85,6 +85,15 @@ def _parse_scopes(value: Any) -> frozenset[str]:
 class Authenticator:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        if settings.auth_mode == "jwt":
+            if not settings.jwt_issuer:
+                raise ValueError("MCP_JWT_ISSUER is required when MCP_AUTH_MODE=jwt")
+            if not settings.jwt_audience:
+                raise ValueError("MCP_JWT_AUDIENCE is required when MCP_AUTH_MODE=jwt")
+            if not settings.jwks_url and not settings.jwt_secret:
+                raise ValueError(
+                    "MCP_JWKS_URL or MCP_JWT_SECRET is required when MCP_AUTH_MODE=jwt"
+                )
         self._jwk_client = PyJWKClient(settings.jwks_url) if settings.jwks_url else None
 
     def default_principal(self) -> TenantPrincipal:
