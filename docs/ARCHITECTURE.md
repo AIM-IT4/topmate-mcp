@@ -2,48 +2,88 @@
 
 ## Product goal
 
-Expose the creator-commerce surface of Topmate to AI clients through stable MCP tools while keeping provider-specific API details behind an adapter boundary.
+Expose creator-commerce workflows through stable MCP tools while isolating each creator account and keeping provider-specific details behind an adapter boundary.
 
 ```text
 ChatGPT / Claude / Codex / Cursor
               |
-        Streamable HTTP MCP
+        Bearer / OIDC JWT
               |
-     Topmate MCP Gateway
-      |      |       |
-   scopes  audit  idempotency
-      |      |       |
-        Provider contract
-        /             \
-SandboxProvider   TopmateProvider
-(full demo)       (official API adapter)
+      FastAPI auth middleware
+              |
+     authenticated principal
+      creator + actor + scopes
+              |
+       ContextVar boundary
+              |
+      TenantGatewayRouter
+       /        |        \
+ provider   idempotency   audit/rate-limit
+    |
+ Provider contract
+  /          \
+sandbox    public
+              \
+        future Topmate API
 ```
 
-## Design principles
+## Multi-tenant request model
 
-1. **No private endpoint guessing.** The production Topmate adapter is added only against an authorized API contract.
-2. **Stable MCP contracts.** AI clients should not change when Topmate changes internal services.
-3. **Least privilege.** Every tool maps to an explicit scope.
-4. **Safe retries.** Every mutation requires an idempotency key.
-5. **Auditable writes.** Mutation attempts are recorded with actor, tenant, action, outcome and a payload hash; raw secrets are not logged.
-6. **Multi-tenant boundary.** Creator identity is supplied by authenticated context, not trusted from tool arguments.
-7. **Serverless-friendly transport.** Stateless Streamable HTTP is used for the MCP transport.
+1. The HTTP middleware authenticates every `/mcp` request.
+2. Authentication yields a `TenantPrincipal`: creator ID, actor ID, scopes, provider and optional public profile URL.
+3. The principal is stored in a request-local `ContextVar`.
+4. MCP tools call a `TenantGatewayRouter` rather than a fixed global creator gateway.
+5. The router resolves the tenant runtime and constructs a request-scoped `Gateway` with the current principal.
+6. Scope checks occur immediately before every provider call.
+7. Idempotency, audit records and rate-limit buckets are isolated per creator runtime.
+
+Creator identity never comes from MCP tool arguments.
+
+## Authentication modes
+
+- `none`: local/sandbox compatibility mode.
+- `bearer`: legacy single-token protected preview.
+- `multi_bearer`: hashed per-creator opaque tokens for pilots.
+- `jwt`: JWT/OIDC access-token verification with either JWKS asymmetric signing or a controlled shared secret.
+
+JWT mode can enforce issuer, audience, accepted algorithms, expiry and subject. Creator identity is read from the configured claim (default `creator_id`) with `sub` as fallback.
 
 ## Provider modes
 
 ### sandbox
-Implements the complete workflow surface with synthetic creator/customer state. Intended for demos, contract tests and Topmate stakeholder evaluation.
+
+Implements the workflow contract with synthetic creator/customer state. A separate sandbox provider is created for each creator, so data cannot bleed between authenticated tenants in the same process.
 
 ### public
-Reads a public Topmate profile. It intentionally rejects creator-side write actions.
+
+Reads a configured public Topmate profile and intentionally rejects creator-side write actions.
 
 ### future topmate_api
-Production adapter for Topmate-authorized APIs. It translates provider responses into stable MCP contracts and maps Topmate OAuth scopes to gateway scopes.
 
-## Authentication
+Production adapter for Topmate-authorized APIs. It should exchange or forward Topmate-issued credentials server-side and translate provider responses into the stable MCP contract.
 
-The alpha gateway supports MCP_AUTH_MODE=none for isolated demos and MCP_AUTH_MODE=bearer for protected previews. A production Topmate deployment should use OAuth 2.1 / OIDC with PKCE, consent, revocation and short-lived access tokens.
+No private Topmate endpoint guessing is part of this project.
 
-## Persistence
+## State and scale
 
-The sandbox provider is intentionally ephemeral. Production state remains owned by Topmate. A persistent standalone demo can add Postgres/Supabase without changing the MCP tool contracts.
+The request authentication boundary is multi-user. The sandbox provider, audit log, idempotency store and rate limiter are still process-local.
+
+For horizontal/serverless production:
+
+- provider-owned Topmate state should remain in Topmate;
+- idempotency should move to durable Redis/Postgres;
+- audit records should move to append-only durable storage;
+- rate limits should move to Redis/API-gateway enforcement;
+- account/provider credentials should live in a secret manager or encrypted credential store.
+
+The `TenantGatewayRouter` has an LRU tenant-runtime cap so an unbounded number of authenticated creator IDs cannot grow process memory indefinitely.
+
+## Security invariants
+
+- no creator ID override in tool parameters;
+- no raw opaque tenant token in configuration, only its SHA-256 digest;
+- JWT signature/expiry verification before tenant selection;
+- explicit scope requirement per tool;
+- payload hashes in audit records instead of raw mutation bodies;
+- per-tenant idempotency namespace;
+- high-impact operations remain explicit MCP calls.
