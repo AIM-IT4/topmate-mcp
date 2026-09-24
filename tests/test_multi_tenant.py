@@ -1,8 +1,11 @@
 import asyncio
 import hashlib
 import json
+import time
 
-from topmate_mcp.auth import Authenticator, TenantPrincipal, principal_scope
+import jwt
+
+from topmate_mcp.auth import AuthenticationError, Authenticator, TenantPrincipal, principal_scope
 from topmate_mcp.config import Settings
 from topmate_mcp.runtime import TenantGatewayRouter
 
@@ -101,3 +104,65 @@ def test_idempotency_keys_are_tenant_local():
         assert second["idempotent_replay"] is False
 
     asyncio.run(run())
+
+
+def test_jwt_auth_maps_verified_claims_to_tenant(monkeypatch):
+    secret = "test-signing-secret"
+    issuer = "https://identity.example.test"
+    audience = "topmate-mcp"
+
+    monkeypatch.setenv("MCP_AUTH_MODE", "jwt")
+    monkeypatch.setenv("MCP_JWT_SECRET", secret)
+    monkeypatch.setenv("MCP_JWT_ISSUER", issuer)
+    monkeypatch.setenv("MCP_JWT_AUDIENCE", audience)
+    monkeypatch.setenv("MCP_JWT_ALGORITHMS", "HS256")
+
+    token = jwt.encode(
+        {
+            "sub": "user_789",
+            "creator_id": "creator_789",
+            "scope": "services:read services:write",
+            "provider": "sandbox",
+            "iss": issuer,
+            "aud": audience,
+            "exp": int(time.time()) + 300,
+        },
+        secret,
+        algorithm="HS256",
+    )
+
+    principal = Authenticator(Settings()).authenticate(f"Bearer {token}")
+
+    assert principal.actor_id == "user_789"
+    assert principal.creator_id == "creator_789"
+    assert principal.scopes == frozenset({"services:read", "services:write"})
+
+
+def test_jwt_auth_rejects_wrong_audience(monkeypatch):
+    secret = "test-signing-secret"
+    issuer = "https://identity.example.test"
+
+    monkeypatch.setenv("MCP_AUTH_MODE", "jwt")
+    monkeypatch.setenv("MCP_JWT_SECRET", secret)
+    monkeypatch.setenv("MCP_JWT_ISSUER", issuer)
+    monkeypatch.setenv("MCP_JWT_AUDIENCE", "topmate-mcp")
+    monkeypatch.setenv("MCP_JWT_ALGORITHMS", "HS256")
+
+    token = jwt.encode(
+        {
+            "sub": "user_789",
+            "creator_id": "creator_789",
+            "scope": "services:read",
+            "iss": issuer,
+            "aud": "another-service",
+            "exp": int(time.time()) + 300,
+        },
+        secret,
+        algorithm="HS256",
+    )
+
+    try:
+        Authenticator(Settings()).authenticate(f"Bearer {token}")
+    except AuthenticationError:
+        return
+    raise AssertionError("Expected AuthenticationError for wrong JWT audience")
