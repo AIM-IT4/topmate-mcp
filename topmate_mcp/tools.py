@@ -4,10 +4,10 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-from topmate_mcp.runtime import Gateway
+from topmate_mcp.runtime import Gateway, TenantGatewayRouter
 
 
-def register_tools(mcp: MCPServer, gateway: Gateway) -> None:
+def register_tools(mcp: MCPServer, gateway: Gateway | TenantGatewayRouter) -> None:
     @mcp.tool()
     async def topmate_creator_get() -> dict[str, Any]:
         """Get the authenticated creator profile."""
@@ -215,10 +215,9 @@ def register_tools(mcp: MCPServer, gateway: Gateway) -> None:
     @mcp.tool()
     async def topmate_mcp_capabilities() -> dict[str, Any]:
         """Describe provider mode, supported actions and granted scopes."""
-        return {"provider": gateway.provider.name, "actions": sorted(gateway.provider.capabilities), "scopes": sorted(gateway.context.scopes), "creator_id": gateway.context.creator_id}
+        return gateway.describe()
 
     @mcp.tool()
     async def topmate_audit_log(limit: int = 100) -> list[dict[str, Any]]:
         """Read recent MCP mutation audit entries."""
-        gateway.context.require("audit:read")
-        return gateway.audit.list(limit)
+        return gateway.audit_entries(limit)
