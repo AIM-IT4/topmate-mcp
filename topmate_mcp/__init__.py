@@ -1,2 +1,2 @@
-__all__ = ["config", "runtime", "security"]
-__version__ = "1.0.0-alpha.1"
+__all__ = ["auth", "config", "runtime", "security"]
+__version__ = "1.1.0-alpha.1"
